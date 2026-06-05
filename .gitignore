@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environnements et caches d'outils
+.venv/
+.mypy_cache/
+.pytest_cache/
+
+# Generated output (must NOT be committed — created at review time)
+data/output/

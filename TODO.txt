@@ -1,0 +1,253 @@
+================================================================================
+                  TODO / ROADMAP — Projet "call me maybe"
+            Function Calling in LLMs  (constrained decoding "à la main")
+================================================================================
+
+But du projet : transformer un prompt en langage naturel
+  ex: "What is the sum of 2 and 3?"
+en un appel de fonction structuré et 100% valide :
+  { "prompt": "...", "name": "fn_add_numbers", "parameters": {"a": 2.0, "b": 3.0} }
+
+Principe central : on NE fait PAS confiance au modele pour produire du bon JSON.
+On genere le JSON token par token et, a chaque etape, on met a -inf les logits
+des tokens interdits (constrained decoding). Le JSON est donc valide PAR
+CONSTRUCTION, pas par chance.
+
+Legende :  [ ] a faire    [~] en cours    [x] fait
+
+================================================================================
+PHASE 0 — MISE EN PLACE DE L'ENVIRONNEMENT
+================================================================================
+[x] 0.1  Installer uv si besoin et verifier la version de Python (>= 3.10)
+           -> uv 0.11.7, Python 3.13.1 (OK). Verifie le 2026-06-05.
+[x] 0.2  Initialiser le projet uv (pyproject.toml + uv.lock)
+           -> pyproject.toml + uv.lock presents a la racine.
+[x] 0.3  Ajouter les dependances : numpy et pydantic (via uv add)
+           -> numpy 2.4.6 et pydantic 2.13.4 resolus et installes.
+[x] 0.4  Copier le dossier llm_sdk/ a la racine, au meme niveau que src/
+           -> llm_sdk/ present (membre de workspace uv, import OK).
+[x] 0.5  Creer l'arborescence du projet :
+           src/  data/input/  data/output/
+           -> src/ et data/input/ crees. data/output/ sera cree au runtime.
+[x] 0.6  Creer un .gitignore (ignorer __pycache__, .mypy_cache, .venv,
+           data/output/  -> NE PAS commit la sortie)
+           -> Corrige le 2026-06-05 : espaces de tete retires (patterns OK)
+              + data/output/ desormais ignore.
+[x] 0.7  Verifier que "uv sync" fonctionne (c'est ce que lancera le correcteur)
+           -> "uv sync" termine avec exit 0 le 2026-06-05.
+[x] 0.8  Placer les fichiers d'entree de test dans data/input/ :
+           functions_definition.json  et  function_calling_tests.json
+           -> les deux fichiers sont presents dans data/input/.
+
+================================================================================
+PHASE 1 — COMPRENDRE LE TERRAIN (apprentissage, avant de coder le coeur)
+================================================================================
+[x] 1.1  Explorer l'API publique de llm_sdk (Small_LLM_Model) :
+           - get_logits_from_input_ids(input_ids: list[int]) -> list[float]
+           - get_path_to_vocab_file() -> str  (NOM REEL, pas vocabulary_json)
+           - encode(text: str) -> torch.Tensor  (2-D, .tolist()[0] pour list[int])
+           - decode(token_ids) -> str
+           - get_path_to_merges_file(), get_path_to_tokenizer_file() (bonus)
+           Verifie le 2026-06-05 en lisant llm_sdk/__init__.py.
+[x] 1.2  Ecrire un mini-script jetable explore.py (hors src/, non rendu) :
+           - encode() -> Tensor -> .tolist()[0] -> input_ids
+           - get_logits_from_input_ids(input_ids) -> 151936 floats
+           - argmax manuel (greedy) -> next token id
+           - vocab.json (id_to_token) -> token string
+           Lance avec succes le 2026-06-05. Sortie observee :
+             prompt "What is the sum of 2 and 3?" -> 11 tokens
+             vocab size = 151936  (> 151643 entrees vocab.json : tokens speciaux + padding)
+             argmax = 3555 'GWhat' (logit 17.38)
+             top5 : GWhat, GTo, GAlso, GCC, GHow
+[x] 1.3  Ouvrir vocab.json et comprendre sa structure :
+           - mapping token_string -> id (a inverser : id -> token_string)
+           - le symbole G (U+0120) = espace precedant un mot (ex: 'Gis', 'Gsum')
+           - les chiffres sont des tokens individuels (ex: '2'->17, '3'->18)
+           - l'espace seul est le token 220 ('G')
+           - vocab.json a 151643 entrees < 151936 logits -> les IDs manquants
+             sont des tokens speciaux/padding -> a masquer a -inf dans le decoder
+[x] 1.4  Noter quels IDs correspondent aux caracteres cles du JSON :
+           Exercice de masquage valide le 2026-06-05 : en mettant a -inf tous
+           les logits sauf les chiffres, le modele est FORCE de sortir un
+           chiffre ('1') au lieu de 'GWhat'. LECON : le masquage garantit la
+           STRUCTURE (100% valide), pas le CONTENU (justesse vient du modele).
+           IDs des tokens 1-caractere (vocab Qwen3-0.6B) :
+             { =90  } =92  [ =58  ] =60  " =1  : =25  , =11  . =13  - =12
+             chiffres 0-9 = 15..24 (bloc contigu)  true=1866  false=3849
+             espace nu ' ' = None (l'espace n'existe que colle : 'G...')
+           SUBTILITE MAJEURE -> tokens COMBINES de plusieurs chars :
+             {" =4913   ": =788   ":" =3252   ", =497   }, =2137   "} =9207
+             => "1 char = 1 token" est FAUX. Le decodeur (Phase 5) devra gerer
+                qu'un token avance le JSON de plusieurs caracteres.
+           DECISIONS DE DESIGN retenues :
+             - generer du JSON COMPACT sans espaces ({"a":2.0}) pour eviter le G
+             - NE PAS hardcoder les IDs : les recalculer au runtime depuis vocab.json
+
+================================================================================
+PHASE 2 — MODELES DE DONNEES (pydantic) -> src/models.py
+================================================================================
+[ ] 2.1  Modele FunctionParameter : { type: "number" | "string" | "boolean" ... }
+[ ] 2.2  Modele FunctionDefinition : name, description, parameters, returns
+[ ] 2.3  Modele d'entree Prompt : { prompt: str }
+[ ] 2.4  Modele de sortie FunctionCall : prompt, name, parameters
+[ ] 2.5  Activer la validation pydantic (types, champs requis, pas de cle en trop)
+[ ] 2.6  Gerer proprement les erreurs de validation (message clair, pas de crash)
+
+================================================================================
+PHASE 3 — ENTREES / SORTIES JSON  -> src/io_handler.py
+================================================================================
+[ ] 3.1  Fonction de lecture JSON avec context manager (with open(...))
+[ ] 3.2  Gerer : fichier manquant, JSON invalide, structure inattendue
+           -> message d'erreur clair, jamais de crash (try/except)
+[ ] 3.3  Charger et valider functions_definition.json -> List[FunctionDefinition]
+[ ] 3.4  Charger et valider function_calling_tests.json -> List[Prompt]
+[ ] 3.5  Ecriture de la sortie data/output/function_calling_results.json
+           (creer le dossier output s'il n'existe pas)
+[ ] 3.6  Verifier : JSON valide, pas de virgule trainante, pas de commentaire
+
+================================================================================
+PHASE 4 — UTILITAIRES TOKENIZER  -> src/tokenizer_utils.py
+================================================================================
+[ ] 4.1  Charger vocab.json (chemin via get_path_to_vocab_file() — NOM REEL de la methode)
+[ ] 4.2  Construire la table token-string -> ID et la table ID -> token-string
+[ ] 4.3  Fonction : a partir d'un caractere/chaine voulu, trouver les IDs
+           des tokens qui commencent par / correspondent a ce qui est autorise
+[ ] 4.4  Gerer le symbole d'espace ("Ġ") pour ne pas se tromper de token
+[ ] 4.5  (Bonus eventuel) reimplementer encode/decode a la main
+
+================================================================================
+PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
+================================================================================
+[ ] 5.1  Concevoir la machine a etats du JSON attendu. Etats typiques :
+           START -> "{" -> attendre cle -> ":" -> valeur -> "," ou "}" -> END
+         Adapter selon le schema de la fonction choisie.
+[ ] 5.2  Pour chaque etat, definir l'ENSEMBLE des tokens autorises
+           (ex: apres ":" pour un parametre "number" -> chiffres, "-", ".")
+[ ] 5.3  Boucle de generation token par token :
+           a) recuperer les logits via get_logits_from_input_ids(list[int]) -> list[float]
+           b) calculer le masque des tokens autorises (selon l'etat)
+           c) mettre les logits interdits a -inf (liste Python suffit, numpy optionnel)
+              ex: logits[i] = float('-inf')  OU  np.array(logits)[mask] = -inf
+           d) prendre l'argmax PARMI les tokens autorises (index = prochain token ID)
+           e) ajouter ce token ID a la sequence, mettre a jour l'etat
+[ ] 5.4  Contrainte de TYPE selon functions_definition.json :
+           - number : entier ou flottant valides
+           - string : ouverture/fermeture de guillemets, echappements
+           - boolean : true / false
+[ ] 5.5  Condition d'arret : JSON complet (toutes les cles requises remplies)
+[ ] 5.6  Garde-fou : limite max de tokens pour eviter une boucle infinie
+[ ] 5.7  Verifier que la sortie est TOUJOURS du JSON valide et conforme au schema
+
+================================================================================
+PHASE 6 — CHOIX DE LA FONCTION (par le LLM, PAS par heuristique)
+================================================================================
+[ ] 6.1  Construire un prompt qui presente les fonctions disponibles au modele
+[ ] 6.2  Contraindre la generation du champ "name" aux SEULS noms de fonctions
+           existants dans functions_definition.json (decodage contraint sur un
+           ensemble de chaines autorisees)
+[ ] 6.3  INTERDIT : choisir la fonction avec des regex / mots-cles / if-else
+           sur le texte. Le choix doit venir des logits du modele.
+[ ] 6.4  Une fois la fonction choisie, generer ses parametres (Phase 5) selon
+           le schema de CETTE fonction.
+
+================================================================================
+PHASE 7 — ORCHESTRATION  -> src/pipeline.py
+================================================================================
+[ ] 7.1  Pour chaque prompt : choisir la fonction (Phase 6) puis generer les
+           parametres (Phase 5) -> construire un FunctionCall
+[ ] 7.2  Collecter tous les FunctionCall dans une liste
+[ ] 7.3  Ecrire le resultat final via io_handler (Phase 3)
+[ ] 7.4  Gerer les cas degrades sans crasher (prompt ambigu, vide, etc.)
+
+================================================================================
+PHASE 8 — CLI ET POINT D'ENTREE  -> src/cli.py + src/__main__.py
+================================================================================
+[ ] 8.1  Parser les arguments :
+           --functions_definition <file>  --input <file>  --output <file>
+[ ] 8.2  Valeurs par defaut : data/input/...  et  data/output/...
+[ ] 8.3  __main__.py : permettre "uv run python -m src"
+[ ] 8.4  Gerer les erreurs d'arguments proprement (message clair)
+
+================================================================================
+PHASE 9 — QUALITE DU CODE (obligatoire pour le sujet)
+================================================================================
+[ ] 9.1  Type hints partout (parametres, retours, variables non triviales)
+[ ] 9.2  Docstrings sur chaque classe et methode (style Google ou NumPy)
+[ ] 9.3  flake8 : lignes <= 79 caracteres, pas d'import inutile, espacement PEP8
+[ ] 9.4  mypy : passe sans erreur avec les flags du sujet
+           (--warn-return-any --warn-unused-ignores --ignore-missing-imports
+            --disallow-untyped-defs --check-untyped-defs)
+[ ] 9.5  (Optionnel) mypy --strict (lint-strict)
+[ ] 9.6  Gestion gracieuse des exceptions partout (jamais de crash brut)
+
+================================================================================
+PHASE 10 — MAKEFILE
+================================================================================
+[ ] 10.1  install      -> uv sync
+[ ] 10.2  run          -> uv run python -m src
+[ ] 10.3  debug        -> uv run python -m pdb -m src
+[ ] 10.4  clean        -> supprimer __pycache__, .mypy_cache, etc.
+[ ] 10.5  lint         -> flake8 . && mypy . (flags du sujet)
+[ ] 10.6  lint-strict  -> flake8 . && mypy . --strict   (optionnel)
+
+================================================================================
+PHASE 11 — TESTS (non rendus mais essentiels)
+================================================================================
+[ ] 11.1  Cas nominaux : addition, greet, reverse string
+[ ] 11.2  Cas limites : chaine vide, grands nombres, caracteres speciaux
+[ ] 11.3  Mauvais types, prompts ambigus
+[ ] 11.4  Fichiers d'entree manquants ou JSON invalide -> erreur propre
+[ ] 11.5  Verifier que 100% des sorties sont du JSON valide
+[ ] 11.6  Mesurer la precision (objectif 90%+) et le temps (< 5 min total)
+
+================================================================================
+PHASE 12 — README.md (en anglais, exige par le sujet)
+================================================================================
+[ ] 12.1  Premiere ligne EN ITALIQUE :
+           "This project has been created as part of the 42 curriculum by <login>"
+[ ] 12.2  Section Description (but + apercu)
+[ ] 12.3  Section Instructions (install, run)
+[ ] 12.4  Section Resources (references + comment l'IA a ete utilisee, ou)
+[ ] 12.5  Algorithm explanation (decrire le constrained decoding en detail)
+[ ] 12.6  Design decisions
+[ ] 12.7  Performance analysis (precision, vitesse, fiabilite)
+[ ] 12.8  Challenges faced
+[ ] 12.9  Testing strategy
+[ ] 12.10 Example usage
+
+================================================================================
+PHASE 13 — FINALISATION ET RENDU
+================================================================================
+[ ] 13.1  Verifier l'arborescence finale du depot :
+           src/  llm_sdk/  data/input/  pyproject.toml  uv.lock  README.md  Makefile
+[ ] 13.2  S'assurer que data/output/ N'EST PAS commit
+[ ] 13.3  Relancer make lint -> 0 erreur
+[ ] 13.4  Relancer "uv sync" depuis zero puis "make run" -> sortie correcte
+[ ] 13.5  Verifier les noms de fichiers (exactement ceux attendus)
+[ ] 13.6  Se preparer a la defense : savoir EXPLIQUER chaque ligne + une petite
+           modification a chaud peut etre demandee
+
+================================================================================
+PHASE 14 — BONUS (optionnel, ne pas commencer avant que la base marche)
+================================================================================
+[ ] 14.1  Support de plusieurs modeles (au-dela de Qwen3-0.6B)
+[ ] 14.2  Reimplementer le tokenizer (encode/decode) a la main, sans utiliser
+            encode/decode du sdk dans le code principal
+[ ] 14.3  Mecanismes de recuperation d'erreur avances
+[ ] 14.4  Optimisations de performance (cache, batching)
+[ ] 14.5  Suite de tests complete
+[ ] 14.6  Visualisation du processus de generation token par token
+[ ] 14.7  Support d'arguments de fonction imbriques (nested)
+
+================================================================================
+RAPPELS / INTERDICTIONS A NE JAMAIS OUBLIER
+================================================================================
+- INTERDIT : dspy, pytorch, huggingface, transformers, outlines, etc.
+- INTERDIT : methodes/attributs prives de llm_sdk (prefixe _)
+- INTERDIT : choisir la fonction par heuristique (regex, mots-cles, if/else)
+- INTERDIT : compter sur le prompt pour produire du JSON valide
+             -> la fiabilite vient du CONSTRAINED DECODING
+- INTERDIT : hardcoder les exemples (les fichiers changent a la correction)
+- OBLIGATOIRE : pydantic pour toute validation, type hints, docstrings,
+                gestion gracieuse des erreurs
+================================================================================

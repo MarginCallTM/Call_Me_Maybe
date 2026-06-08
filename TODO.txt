@@ -86,24 +86,48 @@ PHASE 1 — COMPRENDRE LE TERRAIN (apprentissage, avant de coder le coeur)
 ================================================================================
 PHASE 2 — MODELES DE DONNEES (pydantic) -> src/models.py
 ================================================================================
-[ ] 2.1  Modele FunctionParameter : { type: "number" | "string" | "boolean" ... }
-[ ] 2.2  Modele FunctionDefinition : name, description, parameters, returns
-[ ] 2.3  Modele d'entree Prompt : { prompt: str }
-[ ] 2.4  Modele de sortie FunctionCall : prompt, name, parameters
-[ ] 2.5  Activer la validation pydantic (types, champs requis, pas de cle en trop)
-[ ] 2.6  Gerer proprement les erreurs de validation (message clair, pas de crash)
+[x] 2.1  Modele FunctionParameter : { type: "number" | "string" | "boolean" ... }
+           -> classe ParameterSpec (type: Literal["number","string","boolean"]).
+[x] 2.2  Modele FunctionDefinition : name, description, parameters, returns
+           -> name, description, parameters: dict[str, ParameterSpec], returns.
+[x] 2.3  Modele d'entree Prompt : { prompt: str }
+[x] 2.4  Modele de sortie FunctionCall : prompt, name, parameters
+           -> parameters: dict[str, float | str | bool] (VALEURS, pas types).
+[x] 2.5  Activer la validation pydantic (types, champs requis, pas de cle en trop)
+           -> model_config = ConfigDict(extra="forbid") sur les 4 classes.
+              Teste le 2026-06-08 : rejette bien un type "integer" inconnu ET
+              une cle en trop ("oops") avec un message ValidationError clair.
+[x] 2.6  Gerer proprement les erreurs de validation (message clair, pas de crash)
+           -> les modeles LEVENT la ValidationError (verifie par le test CLI) ;
+              la CAPTURE (try/except) se fera en Phase 3 (io_handler.py), au
+              moment de charger les fichiers JSON reels.
+PHASE 2 TERMINEE le 2026-06-08. src/__init__.py cree (vide, 0 octet) pour que
+"from src.models import ..." et "python -m src" fonctionnent.
 
 ================================================================================
 PHASE 3 — ENTREES / SORTIES JSON  -> src/io_handler.py
 ================================================================================
-[ ] 3.1  Fonction de lecture JSON avec context manager (with open(...))
-[ ] 3.2  Gerer : fichier manquant, JSON invalide, structure inattendue
+[x] 3.1  Fonction de lecture JSON avec context manager (with open(...))
+           -> _read_json(path) : with open(...) + json.load.
+[x] 3.2  Gerer : fichier manquant, JSON invalide, structure inattendue
            -> message d'erreur clair, jamais de crash (try/except)
-[ ] 3.3  Charger et valider functions_definition.json -> List[FunctionDefinition]
-[ ] 3.4  Charger et valider function_calling_tests.json -> List[Prompt]
-[ ] 3.5  Ecriture de la sortie data/output/function_calling_results.json
+           -> 3 modes geres : OSError, json.JSONDecodeError, ValidationError.
+              Exception maison DataError (approche A) : tout est convertie en
+              DataError avec message clair + "raise ... from exc" (chaining).
+              Une seule capture suffira au point d'entree (Phase 8).
+[x] 3.3  Charger et valider functions_definition.json -> List[FunctionDefinition]
+           -> load_functions() via TypeAdapter(list[FunctionDefinition]).
+[x] 3.4  Charger et valider function_calling_tests.json -> List[Prompt]
+           -> load_prompts() via TypeAdapter(list[Prompt]).
+[x] 3.5  Ecriture de la sortie data/output/function_calling_results.json
            (creer le dossier output s'il n'existe pas)
-[ ] 3.6  Verifier : JSON valide, pas de virgule trainante, pas de commentaire
+           -> write_results() : Path.mkdir(parents=True, exist_ok=True) +
+              json.dump(indent=2, ensure_ascii=False).
+[x] 3.6  Verifier : JSON valide, pas de virgule trainante, pas de commentaire
+           -> garanti par json.dump. Teste le 2026-06-08 : 5 fonctions + 11
+              prompts charges, sortie ecrite au bon format (cles prompt/name/
+              parameters dans l'ordre), DataError propre sur fichier manquant.
+PHASE 3 TERMINEE le 2026-06-08.
 
 ================================================================================
 PHASE 4 — UTILITAIRES TOKENIZER  -> src/tokenizer_utils.py

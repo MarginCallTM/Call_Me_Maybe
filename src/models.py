@@ -2,7 +2,7 @@
 # ABOUTME: They validate the input files and the structued output
 
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # The set of parameter types we know how to handle. Using a
 # literal means pydantic REJECTS any unknow type with a clear
@@ -22,6 +22,10 @@ class ParameterSpec(BaseModel):
     type:
             The expected type of the parameter ("number", "string" or "bool")
     """
+    # extra="forbid": reject any unexpected key (e.g typo) instead
+    # of silently ignoring it -> fail fast with a clear error.
+    model_config = ConfigDict(extra="forbid")
+
     type: ParameterType
 
 
@@ -40,6 +44,9 @@ class FunctionDefinition(BaseModel):
             Type descriptor of the return value. Modelled for completeness
             and validation; the pipeline itself does not use it.
     """
+
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     description: str
     parameters: dict[str, ParameterSpec]
@@ -53,6 +60,8 @@ class Prompt(BaseModel):
     prompt:
                 The raw question, e.g. "What is the sum of 2 and 3?"
     """
+
+    model_config = ConfigDict(extra="forbid")
     prompt: str
 
 
@@ -71,7 +80,10 @@ class FunctionCall(BaseModel):
     parameters:
         Mapping ``param_name -> value``. A value is a float (number),
         a str (string) or a bool (boolean).
-"""
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    
     prompt: str
     name: str
     parameters: dict[str, float | str | bool]

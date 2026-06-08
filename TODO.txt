@@ -132,12 +132,25 @@ PHASE 3 TERMINEE le 2026-06-08.
 ================================================================================
 PHASE 4 — UTILITAIRES TOKENIZER  -> src/tokenizer_utils.py
 ================================================================================
-[ ] 4.1  Charger vocab.json (chemin via get_path_to_vocab_file() — NOM REEL de la methode)
-[ ] 4.2  Construire la table token-string -> ID et la table ID -> token-string
-[ ] 4.3  Fonction : a partir d'un caractere/chaine voulu, trouver les IDs
+[x] 4.1  Charger vocab.json (chemin via get_path_to_vocab_file() — NOM REEL de la methode)
+           -> classe Vocabulary(vocab_path: str). Decouplee du modele : on lui
+              passe un CHEMIN (str), pas l'instance lourde Small_LLM_Model.
+              _load() reutilise DataError (OSError + JSONDecodeError).
+[x] 4.2  Construire la table token-string -> ID et la table ID -> token-string
+           -> token_to_id (natif vocab.json) + id_to_token (inverse, calcule
+              une fois dans __init__ via dict-comprehension).
+[x] 4.3  Fonction : a partir d'un caractere/chaine voulu, trouver les IDs
            des tokens qui commencent par / correspondent a ce qui est autorise
-[ ] 4.4  Gerer le symbole d'espace ("Ġ") pour ne pas se tromper de token
+           -> id_of(token) (match exact) + ids_matching(predicate) : on passe
+              une REGLE (ex: "tous les chars sont des chiffres") et on recoit
+              l'ensemble des IDs autorises (gere les tokens multi-caracteres).
+              + token_for_id(id) -> str|None (None pour les IDs speciaux a -inf).
+[x] 4.4  Gerer le symbole d'espace ("Ġ") pour ne pas se tromper de token
+           -> constante SPACE_MARKER + methode is_space_prefixed(token).
 [ ] 4.5  (Bonus eventuel) reimplementer encode/decode a la main
+PHASE 4 TERMINEE le 2026-06-08 (sauf bonus 4.5). py_compile + flake8 OK.
+NB : test_vocab.py (jetable) ecrit pour verifier au runtime (taille 151643,
+IDs structurels, None sur ID special, set de chiffres, detection du Ġ).
 
 ================================================================================
 PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py

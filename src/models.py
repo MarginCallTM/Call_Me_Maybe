@@ -83,7 +83,6 @@ class FunctionCall(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    
     prompt: str
     name: str
     parameters: dict[str, float | str | bool]

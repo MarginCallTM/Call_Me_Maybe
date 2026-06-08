@@ -155,6 +155,25 @@ IDs structurels, None sur ID special, set de chiffres, detection du Ġ).
 ================================================================================
 PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
 ================================================================================
+[~] PHASE 5 EN COURS. Decoupee en 4 couches (du simple au dur) :
+      [x] Couche 0 : masquage des logits + argmax (FAIT le 2026-06-08).
+            -> src/constrained_decoder.py : exception DecodeError + numpy.
+            -> mask_logits(logits, allowed_ids) : part d'un tableau tout a
+               -inf puis "rouvre" seulement les IDs autorises (vectorise).
+            -> select_next_token(...) : argmax sur le masque = meilleur token
+               PARMI les autorises (greedy) ; leve DecodeError si set vide.
+            -> couvre les sous-etapes 5.3c (mettre interdits a -inf) et
+               5.3d (argmax parmi autorises). numpy retenu (plus rapide).
+            -> test jetable test_mask.py (faux logits, SANS modele) : verifie
+               qu'un token interdit a gros logit n'est jamais choisi.
+            -> PIEGE RENCONTRE (PEP 263) : le commentaire ligne 1 contenait
+               "decoding: logit" -> Python y voit "coding: logit" et croit a
+               une declaration d'encodage -> SyntaxError "unknown encoding:
+               logit". CORRIGE en retirant le ":" (decoding (logit ...)).
+               LECON : jamais "coding:" / "coding=" dans les 2 1eres lignes.
+      [ ] Couche 1 : generer UNE valeur typee (number, puis string, boolean).
+      [ ] Couche 2 : machine a etats de l'objet complet { "cle": val, ... }.
+      [ ] Couche 3 : garde-fou (limite max de tokens) + condition d'arret.
 [ ] 5.1  Concevoir la machine a etats du JSON attendu. Etats typiques :
            START -> "{" -> attendre cle -> ":" -> valeur -> "," ou "}" -> END
          Adapter selon le schema de la fonction choisie.

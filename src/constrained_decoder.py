@@ -329,3 +329,41 @@ def generate_string(
         raise DecodeError("String exceeded max_tokens (runaway)")
 
     return decode(content)
+
+
+def generate_boolean(
+    get_logits: Callable[[list[int]], list[float]],
+    prefix_ids: list[int],
+    vocab: Vocabulary,
+) -> bool:
+    """Generate a JSON boolean in a single contrained step.
+
+    A JSON boolean is one of exactly two literals, 'true' or
+    'false'. and in this tokenizer each is a SINGLE token.
+    So there is no state machine and no loop: We allow only
+    those two token IDs, mask everything else to -inf and let
+    the model pick the one that fits the prompt. The choice comes
+    from the model, never from keyword heuristic (a hard requirement
+    of the subject).
+
+    Args:
+        get_logits: Maps current input IDs to raw next-token logits
+            (inject model.get_logits_from_input_ids in production).
+        prefix_ids: Token IDs already fixed before the bool.
+        vocab: The loaded vocabulary.
+    Returns:
+        The chosen bool value (True / False)
+    Raises:
+        DecodeError: If 'true' or 'false' is missing from the vocab
+    """
+    true_id = vocab.id_of("true")
+    false_id = vocab.id_of("false")
+    if true_id is None or false_id is None:
+        raise DecodeError(
+            "Vocabulary is missing the 'true'/'false' tokens."
+        )
+    logits = get_logits(prefix_ids)
+    # Only two doors open; the model picks one. We never look at the
+    # prompt text ourselves -> the decision is the model's
+    token_id = select_next_token(logits, {true_id, false_id})
+    return token_id == true_id

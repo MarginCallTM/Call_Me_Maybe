@@ -171,7 +171,8 @@ PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
                une declaration d'encodage -> SyntaxError "unknown encoding:
                logit". CORRIGE en retirant le ":" (decoding (logit ...)).
                LECON : jamais "coding:" / "coding=" dans les 2 1eres lignes.
-      [~] Couche 1 : generer UNE valeur typee (number, puis string, boolean).
+      [x] Couche 1 : generer UNE valeur typee (number, string, boolean).
+            TERMINEE le 2026-06-09 (les 3 testees, tout fonctionne).
             [x] number : FAIT le 2026-06-09. src/constrained_decoder.py ->
                 generate_number(get_logits, prefix_ids, vocab, stop_ids,
                 max_tokens=32). Machine a etats a 5 etats : start ->
@@ -193,9 +194,20 @@ PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
                    petit ID = '0'. Un 2e '.' est impossible PAR CONSTRUCTION.
                    PIEGE : stop_ids = {script[-1]} dans le test -> changer la
                    liste change le token d'arret sans le voir.
-            [ ] string : guillemets ouvrant/fermant + echappements (\\", \\\\,
-                \\n...). Cas le plus delicat (quotes imbriquees, regex).
-            [ ] boolean : forcer le token 'true' (1866) ou 'false' (3849).
+            [x] string : generate_string. Auto-delimitee (le " fermant =
+                stop, pas de stop_ids). _is_string_content interdit tout
+                token contenant " ou \\ -> JSON valide garanti (limite :
+                pas d'echappements, a revoir pour la fonction regex).
+                decode() INJECTE (model.decode) car les tokens byte-level
+                (Ġ, octets remappes) ne se concatenent pas. Deux listes :
+                generated (envoyee au modele) vs content (decodee).
+                test_string.py -> 'Bob' OK sans modele (faux get_logits +
+                faux decode). PIEGE retape : "o" "b" colle = "ob".
+            [x] boolean : generate_boolean. UN seul token parmi {true,
+                false} (recalcules via id_of, PAS hardcodes). Pas d'etat,
+                pas de boucle, renvoie un bool Python. test_boolean.py :
+                'false' -> False ; un chiffre (favori interdit) -> True
+                (tie-break au plus petit id, true=1866 < false=3849).
       [ ] Couche 2 : machine a etats de l'objet complet { "cle": val, ... }.
       [ ] Couche 3 : garde-fou (limite max de tokens) + condition d'arret.
 [ ] 5.1  Concevoir la machine a etats du JSON attendu. Etats typiques :

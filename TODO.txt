@@ -171,7 +171,31 @@ PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
                une declaration d'encodage -> SyntaxError "unknown encoding:
                logit". CORRIGE en retirant le ":" (decoding (logit ...)).
                LECON : jamais "coding:" / "coding=" dans les 2 1eres lignes.
-      [ ] Couche 1 : generer UNE valeur typee (number, puis string, boolean).
+      [~] Couche 1 : generer UNE valeur typee (number, puis string, boolean).
+            [x] number : FAIT le 2026-06-09. src/constrained_decoder.py ->
+                generate_number(get_logits, prefix_ids, vocab, stop_ids,
+                max_tokens=32). Machine a etats a 5 etats : start ->
+                (int_lead) -> int -> (frac_lead) -> frac. allowed par etat
+                via _allowed_for_number ; transitions via _next_number_state.
+                stop_ids = tokens qui peuvent SUIVRE le nombre (ex }, ,) ;
+                offerts seulement dans les etats complets (int, frac) -> le
+                modele decide la longueur mais avec des fins LEGALES. Predicat
+                chiffres reutilise de la Phase 1 (all-digit, multi-char OK).
+                DESIGN : get_logits est INJECTE (Callable) au lieu du modele
+                -> decouplage, testable sans charger le modele lourd, src/
+                sans torch. _number_specials() leve DecodeError si - ou .
+                manquent. for/else = garde-fou anti-boucle (max_tokens).
+                -> test jetable test_number.py : faux get_logits scenarise
+                   (logit 100 au token voulu) ; valide '2.0' SANS modele.
+                   LECON CLE confirmee : la grammaire (masque) gagne TOUJOURS
+                   sur le favori du modele ; un favori interdit -> -inf -> les
+                   autorises restent ex aequo a 0.0 -> np.argmax prend le plus
+                   petit ID = '0'. Un 2e '.' est impossible PAR CONSTRUCTION.
+                   PIEGE : stop_ids = {script[-1]} dans le test -> changer la
+                   liste change le token d'arret sans le voir.
+            [ ] string : guillemets ouvrant/fermant + echappements (\\", \\\\,
+                \\n...). Cas le plus delicat (quotes imbriquees, regex).
+            [ ] boolean : forcer le token 'true' (1866) ou 'false' (3849).
       [ ] Couche 2 : machine a etats de l'objet complet { "cle": val, ... }.
       [ ] Couche 3 : garde-fou (limite max de tokens) + condition d'arret.
 [ ] 5.1  Concevoir la machine a etats du JSON attendu. Etats typiques :

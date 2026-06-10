@@ -227,36 +227,49 @@ PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
             len(params) (connu du schema) + chaque valeur a deja son
             propre max_tokens -> Couche 3 sera tres legere (juste
             confirmer l'arret global, pas de nouveau garde-fou lourd).
-      [ ] Couche 3 : garde-fou (limite max de tokens) + condition d'arret.
-[ ] 5.1  Concevoir la machine a etats du JSON attendu. Etats typiques :
-           START -> "{" -> attendre cle -> ":" -> valeur -> "," ou "}" -> END
-         Adapter selon le schema de la fonction choisie.
-[ ] 5.2  Pour chaque etat, definir l'ENSEMBLE des tokens autorises
-           (ex: apres ":" pour un parametre "number" -> chiffres, "-", ".")
-[ ] 5.3  Boucle de generation token par token :
-           a) recuperer les logits via get_logits_from_input_ids(list[int]) -> list[float]
-           b) calculer le masque des tokens autorises (selon l'etat)
-           c) mettre les logits interdits a -inf (liste Python suffit, numpy optionnel)
-              ex: logits[i] = float('-inf')  OU  np.array(logits)[mask] = -inf
-           d) prendre l'argmax PARMI les tokens autorises (index = prochain token ID)
-           e) ajouter ce token ID a la sequence, mettre a jour l'etat
-[ ] 5.4  Contrainte de TYPE selon functions_definition.json :
-           - number : entier ou flottant valides
-           - string : ouverture/fermeture de guillemets, echappements
-           - boolean : true / false
-[ ] 5.5  Condition d'arret : JSON complet (toutes les cles requises remplies)
-[ ] 5.6  Garde-fou : limite max de tokens pour eviter une boucle infinie
-[ ] 5.7  Verifier que la sortie est TOUJOURS du JSON valide et conforme au schema
+      [x] Couche 3 : garde-fou (limite max de tokens) + condition d'arret.
+            TERMINEE le 2026-06-10. 2 filets legers ajoutes a
+            generate_object (l'objet etait deja borne par construction
+            -> pas de nouvel automate) :
+              - max_value_tokens=256 (parametre) : budget GLOBAL de
+                tokens "valeur" (les seuls qui couvent un appel modele,
+                la structure est forcee/gratuite). Compteur
+                value_tokens_used incremente apres chaque
+                generate_number/string/boolean ; DecodeError si depasse.
+              - apres le "}" force : "if set(result) != set(params):
+                raise DecodeError(...)" -> condition d'arret 5.5
+                explicite (toujours vraie aujourd'hui car les cles sont
+                forcees, mais documente la postcondition et protege
+                d'un futur refactor).
+            Couvre 5.4 (dispatch number/string/boolean), 5.5 (complet)
+            et 5.6 (budget global). 5.1-5.3 et 5.7 = couverts par
+            generate_object + Couches 0-2 (machine a etats = la boucle
+            sur params, masque = allowed selon le type/etat).
+PHASE 5 TERMINEE le 2026-06-10 (Couches 0-3 toutes faites, testees
+sans modele lourd).
 
 ================================================================================
 PHASE 6 — CHOIX DE LA FONCTION (par le LLM, PAS par heuristique)
 ================================================================================
-[ ] 6.1  Construire un prompt qui presente les fonctions disponibles au modele
-[ ] 6.2  Contraindre la generation du champ "name" aux SEULS noms de fonctions
-           existants dans functions_definition.json (decodage contraint sur un
-           ensemble de chaines autorisees)
-[ ] 6.3  INTERDIT : choisir la fonction avec des regex / mots-cles / if-else
-           sur le texte. Le choix doit venir des logits du modele.
+[x] 6.1+6.2+6.3  TERMINES le 2026-06-10. generate_choice(get_logits,
+           encode_text, prefix_ids, choices) -> str, dans
+           src/constrained_decoder.py. Principe : TRIE DE TOKENS.
+           Chaque choix (ex. nom de fonction) est tokenise une fois via
+           encode_text (encode() public, autorise). A chaque pas, seuls
+           les tokens qui prolongent au moins un candidat restant sont
+           autorises (mask) ; quand un seul candidat reste a un
+           embranchement, le MODELE choisit via select_next_token (zero
+           heuristique). for/else = garde anti-boucle (max_len+1).
+           Sortie garantie etre un element de `choices` (validite par
+           construction) ; LEQUEL vient du modele (exactitude depend du
+           prompt, a soigner en Phase 7).
+           test jetable test_choice.py (faux encode_text=ord(char), faux
+           get_logits scenarise vers "fn_greet") : distingue bien
+           "fn_greet" de "fn_get_square_root" (prefixe commun "fn_g")
+           -> branchement correct. OK le 2026-06-10.
+           HYPOTHESE notee : aucun nom n'est prefixe-token d'un autre
+           (vrai pour les noms actuels) ; sinon prevoir un signal
+           d'arret explicite.
 [ ] 6.4  Une fois la fonction choisie, generer ses parametres (Phase 5) selon
            le schema de CETTE fonction.
 

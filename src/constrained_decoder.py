@@ -434,3 +434,53 @@ def generate_object(
     if set(result) != set(params):
         raise DecodeError("Object is missing required parameters.")
     return result
+
+
+def generate_choice(
+        get_logits: Callable[[list[int]], list[float]],
+        encore_text: Callable[[str], list[int]],
+        prefix_ids: list[int],
+        choices: list[str],
+) -> str:
+    """Pick one string from a fixed set by constrained decoding.
+
+    Args:
+        get_logits: Maps inputs IDs to raw next-token logits.
+        encode_text: Maps a string to its canonical token IDs.
+        prefix_ids: Tokens already fixed before the choice (the prompt)
+        choices: The allowed output strings (e.g, function names).
+    Returns:
+        The chosen string, guaranteed to be one of 'choices'
+    Raises:
+        DecodeError: If there is no usable choice or decoding fails.
+    """
+    # Tokenize each choice once into its token-id sequence, then walk
+    # a TOKEN TRIE: at each step only tokens that continue some candidate
+    # are allowed, so the output is always a full valid choice. The
+    # model decides WHICH at each branch (argmax over allowed tokens)
+    pairs: list[tuple[list[int], str]] = []
+    for choice in choices:
+        ids = encore_text(choice)
+        if ids:
+            pairs.append((ids, choice))
+    if not pairs:
+        raise DecodeError("No usable choices to pick from.")
+    sequences = [ids for ids, _ in pairs]
+
+    max_len = max(len(s) for s in sequences)
+    generated: list[int] = []
+    for _ in range(max_len + 1):
+        step = len(generated)
+        matching = [s for s in sequences if s[:step] == generated]
+        allowed = {s[step] for s in matching if step < len(s)}
+        if not allowed:
+            break  # generated equals a complete choice
+        logits = get_logits(prefix_ids + generated)
+        token_id = select_next_token(logits, allowed)
+        generated.append(token_id)
+    else:
+        raise DecodeError("Choice decoding did not terminate.")
+    for ids, choice in pairs:
+        if ids == generated:
+            return choice
+    raise DecodeError("Generated tokens matched no choice.")

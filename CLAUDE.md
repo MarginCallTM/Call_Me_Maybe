@@ -43,7 +43,14 @@ By default: all code goes through the CLI → the user retypes it into VSCode.
 - Break each concept down into simple steps, as if explaining it out loud
 - Draw analogies with C or the Maze project when relevant
 - Never assume a concept is already known: briefly recall the key notions
-- When you propose code, **comment every non-trivial part** directly in the code block
+- **Keep code LIGHT to retype**: the student writes everything by hand, so
+  comments and docstrings must NOT outweigh the code. Put the pedagogical
+  detail in the French explanation around the code, not inside it.
+  - **Comments**: only on genuinely non-obvious logic, one short line each.
+    No comment that just restates what the code plainly says.
+  - **Docstrings**: short. A one-line summary, plus only the strictly
+    needed `Args`/`Returns`/`Raises` lines (one short line per item). No
+    multi-sentence prose inside a docstring; trivial params can be omitted.
 
 ### IMPORTANT — Demystifying LLM concepts (the student starts from zero)
 Before using any LLM-related concept, **you first explain it with simple words and a
@@ -75,7 +82,8 @@ it has already been covered — repetition helps it stick.
 ### Reply format
 - Start with a 2–3 sentence summary of what we're going to do and why
 - Then the conceptual explanation if a new LLM concept is involved
-- Then the annotated code to type
+- Then the code to type — lightly commented (logic lives in the French
+  explanation above it, not buried in the code)
 - End with a short recap of the key points to remember
 
 ---
@@ -103,7 +111,8 @@ it has already been covered — repetition helps it stick.
 - Strict **flake8** compliance (lines ≤ 79 characters, no unused imports, PEP8 spacing)
 - **mypy** compliance: type hints required everywhere (parameters, returns, non-trivial
   variables). `from typing import ...` as needed.
-- **Docstrings** on every class and method (Google or NumPy style)
+- **Docstrings** on every class and method (Google or NumPy style), but kept
+  SHORT (one-line summary + only the essential Args/Returns/Raises lines)
 - **Graceful** exception handling: the program must NEVER crash unexpectedly. Always a
   clear error message (missing file, invalid JSON, wrong type, etc.). Use `try/except`
   and context managers (`with`).
@@ -241,7 +250,8 @@ lint-strict  # (optional) flake8 . && mypy . --strict
 
 1. **Explain the concept** in French (and demystify it if it touches LLMs)
 2. **Recall the link to the subject**: which constraint/requirement we are satisfying
-3. **Propose the annotated code** in a block to type manually
+3. **Propose lightly-commented code** in a block to type manually (short
+   docstrings, comments only on non-obvious logic)
 4. **Flag the points of caution**: subject prohibitions, flake8/mypy pitfalls, common
    mistakes for someone coming from C
 

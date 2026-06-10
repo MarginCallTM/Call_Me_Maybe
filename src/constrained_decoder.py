@@ -177,7 +177,7 @@ def generate_number(
     vocab: Vocabulary,
     stop_ids: set[int],
     max_tokens: int = 32,
-) -> str:
+) -> tuple[str, list[int]]:
     """Generate a JSON number, one constrained token at a time.
 
     We never trust the model to "write a number": at each step we
@@ -199,7 +199,8 @@ def generate_number(
         Choosing one ends the number. Must be non-empty, otherwise the number
         can never terminate by model choice.
 
-        max_tokens: Safety seatbelt against an endless loop. The full stop/guard
+        max_tokens: Safety seatbelt against an endless loop. The full
+        stop/guard
         logic is Couche 3; here it only caps length.
 
     Returns:
@@ -242,7 +243,8 @@ def generate_number(
     # All generated tokens are digits/'-'/'.', never space-prefix
     # so we can concatenate their strings directly.
     chars = [vocab.token_for_id(tid) for tid in generated]
-    return "".join(c for c in chars if c is not None)
+    number_str = "".join(c for c in chars if c is not None)
+    return number_str, generated
 
 
 def _is_string_content(token: str) -> bool:
@@ -271,7 +273,7 @@ def generate_string(
     prefix_ids: list[int],
     vocab: Vocabulary,
     max_tokens: int = 64,
-) -> str:
+) -> tuple[str, list[int]]:
     """Generate a JSON string value, one constrained token at a time.
 
     A JSON string is self-delimited: it opens with a '"', holds any
@@ -328,34 +330,27 @@ def generate_string(
         # for/else: ran only if we never broke out -> runaway.
         raise DecodeError("String exceeded max_tokens (runaway)")
 
-    return decode(content)
+    return decode(content), generated
 
 
 def generate_boolean(
     get_logits: Callable[[list[int]], list[float]],
     prefix_ids: list[int],
     vocab: Vocabulary,
-) -> bool:
-    """Generate a JSON boolean in a single contrained step.
-
-    A JSON boolean is one of exactly two literals, 'true' or
-    'false'. and in this tokenizer each is a SINGLE token.
-    So there is no state machine and no loop: We allow only
-    those two token IDs, mask everything else to -inf and let
-    the model pick the one that fits the prompt. The choice comes
-    from the model, never from keyword heuristic (a hard requirement
-    of the subject).
+) -> tuple[bool, list[int]]:
+    """Generate a JSON boolean in a single constrained step.
 
     Args:
-        get_logits: Maps current input IDs to raw next-token logits
-            (inject model.get_logits_from_input_ids in production).
+        get_logits: Maps input IDs to raw next-token logits.
         prefix_ids: Token IDs already fixed before the bool.
         vocab: The loaded vocabulary.
     Returns:
-        The chosen bool value (True / False)
+        A (value, emitted token IDs) tuple.
     Raises:
-        DecodeError: If 'true' or 'false' is missing from the vocab
+        DecodeError: If 'true' or 'false' is missing from the vocab.
     """
+    # Exactly two literals, each a single token here. We allow only
+    # those two IDs; the model picks (never a keyword heuristic).
     true_id = vocab.id_of("true")
     false_id = vocab.id_of("false")
     if true_id is None or false_id is None:
@@ -363,7 +358,79 @@ def generate_boolean(
             "Vocabulary is missing the 'true'/'false' tokens."
         )
     logits = get_logits(prefix_ids)
-    # Only two doors open; the model picks one. We never look at the
-    # prompt text ourselves -> the decision is the model's
     token_id = select_next_token(logits, {true_id, false_id})
-    return token_id == true_id
+    return token_id == true_id, [token_id]
+
+
+def generate_object(
+    get_logits: Callable[[list[int]], list[float]],
+    decode: Callable[[list[int]], str],
+    encode_text: Callable[[str], list[int]],
+    prefix_ids: list[int],
+    vocab: Vocabulary,
+    params: dict[str, str],
+    max_value_tokens: int = 256
+) -> dict[str, float | str | bool]:
+    """Generate a JSON parameters object, fully constrained.
+
+    Args:
+        get_logits: Maps input IDs to raw next-token logits.
+        decode: Maps token IDs to text (forwarded to generate_string).
+        encode_text: Maps a fixed literal to its token IDs.
+        prefix_ids: Tokens already fixed before the object.
+        vocab: The loaded vocabulary.
+        params: Ordered param_name -> type ("number"|"string"|
+            "boolean"); order drives the JSON layout.
+    Returns:
+        Mapping param_name -> value (float / str / bool).
+    Raises:
+        DecodeError: On a missing structural token or unknown type.
+    """
+    # Structure (braces/keys/colons/commas) is ours: forced literals,
+    # one legal token each -> no model call. Only VALUES are
+    # model-driven, dispatched to the matching Couche-1 generator.
+    comma_id = vocab.id_of(",")
+    brace_close_id = vocab.id_of("}")
+    if comma_id is None or brace_close_id is None:
+        raise DecodeError("Missing ',' or '}': cannot build object.")
+    number_stops = {comma_id, brace_close_id}
+
+    result: dict[str, float | str | bool] = {}
+    generated: list[int] = []
+    generated += encode_text("{")
+    value_tokens_used = 0
+    for index, (name, ptype) in enumerate(params.items()):
+        if index > 0:
+            generated += encode_text(",")
+        generated += encode_text(f'"{name}":')
+        here = prefix_ids + generated  # context for the value
+
+        if ptype == "number":
+            number_str, value_ids = generate_number(
+                get_logits, here, vocab, number_stops
+            )
+            result[name] = float(number_str)  # schema wants 2 -> 2.0
+        elif ptype == "string":
+            text_value, value_ids = generate_string(
+                get_logits, decode, here, vocab
+            )
+            result[name] = text_value
+        elif ptype == "boolean":
+            bool_value, value_ids = generate_boolean(
+                get_logits, here, vocab
+            )
+            result[name] = bool_value
+        else:
+            raise DecodeError(f"Unknown parameter type: {ptype!r}")
+
+        generated += value_ids
+        value_tokens_used += len(value_ids)
+        if value_tokens_used > max_value_tokens:
+            raise DecodeError(
+                f"Object exceeded its token budget ({max_value_tokens})."
+            )
+
+    generated += encode_text("}")
+    if set(result) != set(params):
+        raise DecodeError("Object is missing required parameters.")
+    return result

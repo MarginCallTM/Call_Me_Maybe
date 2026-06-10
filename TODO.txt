@@ -208,7 +208,25 @@ PHASE 5 — LE COEUR : CONSTRAINED DECODING -> src/constrained_decoder.py
                 pas de boucle, renvoie un bool Python. test_boolean.py :
                 'false' -> False ; un chiffre (favori interdit) -> True
                 (tie-break au plus petit id, true=1866 < false=3849).
-      [ ] Couche 2 : machine a etats de l'objet complet { "cle": val, ... }.
+      [x] Couche 2 : machine a etats de l'objet complet { "cle": val, ... }.
+            TERMINEE le 2026-06-10. generate_object() orchestre les 3
+            generateurs de Couche 1. Structure ({ } , : et cles) FORCEE
+            via encode_text(), dans l'ordre du schema -> bonnes cles
+            garanties (ni oubli ni invention). Seules les VALEURS sont
+            decidees par le modele (sous masque). stop_ids d'un nombre
+            = {",", "}"} (les deux suites legales). number -> float()
+            pour matcher le schema de sortie (2 -> 2.0).
+            REFACTOR Couche 1 : generate_number/string/boolean renvoient
+            desormais (valeur, token_ids_emis) au lieu de juste la
+            valeur, pour que generate_object etende son prefixe.
+            test jetable test_object.py (faux get_logits scripte par
+            appel + faux encode_text/decode, SANS modele) : reconstruit
+            {"a":2.0,"b":3.0} pour fn_add_numbers, verifie les valeurs
+            ET les litteraux structurels forces. OK le 2026-06-10.
+            LECON : la boucle de generate_object est BORNEE par
+            len(params) (connu du schema) + chaque valeur a deja son
+            propre max_tokens -> Couche 3 sera tres legere (juste
+            confirmer l'arret global, pas de nouveau garde-fou lourd).
       [ ] Couche 3 : garde-fou (limite max de tokens) + condition d'arret.
 [ ] 5.1  Concevoir la machine a etats du JSON attendu. Etats typiques :
            START -> "{" -> attendre cle -> ":" -> valeur -> "," ou "}" -> END

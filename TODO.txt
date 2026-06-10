@@ -270,17 +270,57 @@ PHASE 6 — CHOIX DE LA FONCTION (par le LLM, PAS par heuristique)
            HYPOTHESE notee : aucun nom n'est prefixe-token d'un autre
            (vrai pour les noms actuels) ; sinon prevoir un signal
            d'arret explicite.
-[ ] 6.4  Une fois la fonction choisie, generer ses parametres (Phase 5) selon
-           le schema de CETTE fonction.
+[x] 6.4  TERMINE le 2026-06-10, voir Phase 7. process_prompt() enchaine
+           generate_choice (nom de fonction) puis generate_object (ses
+           parametres, schema de CETTE fonction recupere via
+           chosen.parameters).
 
 ================================================================================
 PHASE 7 — ORCHESTRATION  -> src/pipeline.py
 ================================================================================
-[ ] 7.1  Pour chaque prompt : choisir la fonction (Phase 6) puis generer les
-           parametres (Phase 5) -> construire un FunctionCall
-[ ] 7.2  Collecter tous les FunctionCall dans une liste
-[ ] 7.3  Ecrire le resultat final via io_handler (Phase 3)
-[ ] 7.4  Gerer les cas degrades sans crasher (prompt ambigu, vide, etc.)
+[x] 7.1  TERMINE le 2026-06-10. process_prompt(user_prompt, functions,
+           get_logits, encode_text, decode, vocab) -> FunctionCall.
+           Etape 1 : build_choice_prompt() + generate_choice() sur la
+           liste des noms reels (pas hardcodes) -> "name". Etape 2 :
+           build_params_prompt() + schema = {param: type} de la fonction
+           choisie -> generate_object() -> "parameters". Construit le
+           FunctionCall (prompt/name/parameters).
+           DESIGN : get_logits/encode_text/decode restent INJECTES
+           (Callable) -> process_prompt() ne voit jamais torch ni
+           Small_LLM_Model, testable sans modele.
+[x] 7.2  TERMINE le 2026-06-10. run(functions, prompts) -> list[FunctionCall].
+           Charge UNE fois Small_LLM_Model() + Vocabulary, definit les
+           wrappers types get_logits/encode_text/decode (cf memoire
+           llm-sdk-import-path : import "from llm_sdk.llm_sdk import
+           Small_LLM_Model"), boucle sur prompts et collecte les
+           FunctionCall dans une liste.
+[ ] 7.3  Ecrire le resultat final via io_handler (Phase 3) -> sera branche
+           au point d'entree (Phase 8, src/__main__.py / cli.py) :
+           load_functions + load_prompts -> run() -> write_results.
+[x] 7.4  TERMINE le 2026-06-10. Dans run(), chaque prompt est traite dans
+           un try/except DecodeError : en cas d'echec (prompt ambigu,
+           budget de tokens depasse, etc.) on affiche un avertissement
+           sur stderr ("[warn] skipped ...") et on continue avec les
+           autres prompts -> jamais de crash global.
+VALIDATION : test_pipeline.py (faux get_logits/encode_text/decode
+scenarises, SANS charger Qwen) -> process_prompt() reconstruit bien
+{"a": 2.0, "b": 3.0} pour fn_add_numbers a partir de "What is the sum
+of 2 and 3?". OK le 2026-06-10 ("test_pipeline OK").
+PIEGE retape : la cle forcee '"b":' fait 4 tokens (", b, ", :) -> dans
+le faux get_logits, le caractere du nom de parametre est a ids[-3], pas
+ids[-2] (ids[-1]==':' et ids[-2]=='"').
+VALIDATION REELLE (2026-06-10) : test_run_real.py (jetable) -> run()
+avec le VRAI Qwen3-0.6B sur les 2 premiers prompts de
+function_calling_tests.json. Resultats :
+  prompt='What is the sum of 2 and 3?' name='fn_add_numbers'
+    parameters={'a': 2.0, 'b': 3.0}
+  prompt='What is the sum of 265 and 345?' name='fn_add_numbers'
+    parameters={'a': 265.0, 'b': 345.0}
+-> choix de fonction CORRECT (modele, pas heuristique) + valeurs
+NUMERIQUES MULTI-CHIFFRES correctement extraites (265, 345) : confirme
+que la machine a etats de generate_number gere bien les nombres a
+plusieurs tokens, pas seulement les cas a 1 chiffre des tests factices.
+PHASE 7 TERMINEE le 2026-06-10 (7.3 reste lie au CLI, voir Phase 8).
 
 ================================================================================
 PHASE 8 — CLI ET POINT D'ENTREE  -> src/cli.py + src/__main__.py
